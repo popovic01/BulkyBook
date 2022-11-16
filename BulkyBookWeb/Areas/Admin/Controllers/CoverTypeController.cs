@@ -5,6 +5,7 @@ using System.Collections;
 
 namespace BulkyBookWeb.Areas.Admin.Controllers
 {
+    [Area("Admin")]
     public class CoverTypeController : Controller
     {
         private IUnitOfWork _unitOfWork;
