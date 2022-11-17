@@ -1,7 +1,9 @@
 ﻿using BulkyBook.DataAccess.Repository.IRepository;
 using BulkyBook.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
+using System.Security.Claims;
 
 namespace BulkyBookWeb.Areas.Customer.Controllers
 {
@@ -23,15 +25,48 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
             return View(products);
         }
 
-        public IActionResult Details(int id)
+        public IActionResult Details(int productId)
         {
             ShoppingCart cart = new()
             {
                 Count = 1, //default value
-                Product = _unitOfWork.ProductRepository.GetFirstOrDefault(p => p.Id == id, includeProperties: "Category,CoverType")
+                ProductId = productId,
+                Product = _unitOfWork.ProductRepository.GetFirstOrDefault(p => p.Id == productId, includeProperties: "Category,CoverType")
             };
 
             return View(cart);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        //only logged in users can access post action method from this page
+        [Authorize]
+        public IActionResult Details(ShoppingCart shoppingCart)
+        {
+            //getting user
+            var claimsIdentity = (ClaimsIdentity)User.Identity;
+            //nameidentifier is user id
+            var claim = claimsIdentity.FindFirst(ClaimTypes.NameIdentifier);
+            shoppingCart.ApplicationUserId = claim.Value; //id
+
+            //cart where we already have product we want to add now and for current user
+            ShoppingCart cartFromDb = _unitOfWork.ShoppingCartRepository.GetFirstOrDefault(c => 
+                c.ProductId == shoppingCart.ProductId && c.ApplicationUserId == claim.Value);
+
+            //if is null we don't have cart like that
+            if (cartFromDb == null)
+            {
+                _unitOfWork.ShoppingCartRepository.Add(shoppingCart);
+            }
+            else
+            {
+                //updating cart's count 
+                _unitOfWork.ShoppingCartRepository.IncrementCount(cartFromDb, shoppingCart.Count);
+            }
+
+            _unitOfWork.Save();
+
+            return RedirectToAction("Index");
         }
 
         public IActionResult Privacy()

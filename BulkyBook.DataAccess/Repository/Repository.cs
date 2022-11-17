@@ -30,10 +30,14 @@ namespace BulkyBook.DataAccess.Repository
 
         //includeProperties - "Category" - to include category
         //includeProperties - "Category,CoverType" - to include both
-        public IEnumerable<T> GetAll(string? includeProperties = null)
+        public IEnumerable<T> GetAll(Expression<Func<T, bool>>? filter = null, string? includeProperties = null)
         {
             //if want to query data before returning
             IQueryable<T> query = dbSet;
+            if (filter != null)
+            {
+                query = query.Where(filter);
+            }
             if (includeProperties != null)
             {
                 foreach (var includeProp in includeProperties.Split(new char[] {','}, StringSplitOptions.RemoveEmptyEntries))
