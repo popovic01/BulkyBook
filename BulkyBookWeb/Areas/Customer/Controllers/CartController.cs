@@ -3,6 +3,7 @@ using BulkyBook.Models;
 using BulkyBook.Models.ViewModel;
 using BulkyBook.Utility;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Stripe.Checkout;
@@ -15,12 +16,14 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
     public class CartController : Controller
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IEmailSender _emailSender;
         [BindProperty] //automatically bind property when we post form
         public ShoppingCartVM ShoppingCartVM { get; set; }
 
-        public CartController(IUnitOfWork unitOfWork)
+        public CartController(IUnitOfWork unitOfWork, IEmailSender emailSender)
         {
             _unitOfWork = unitOfWork;   
+            _emailSender = emailSender;
         }
         public IActionResult Index()
         {
@@ -185,7 +188,7 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
 
         public IActionResult OrderConfirmation(int id)
         {
-            OrderHeader headerFromDb = _unitOfWork.OrderHeaderRepository.GetFirstOrDefault(o => o.Id == id);
+            OrderHeader headerFromDb = _unitOfWork.OrderHeaderRepository.GetFirstOrDefault(o => o.Id == id, includeProperties: "ApplicationUser");
 
             //individual user
             if (headerFromDb.PaymentStatus != SD.PaymentStatusDelayedPayment)
@@ -197,13 +200,20 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
                 //check the stripe status 
                 if (session.PaymentStatus.ToLower() == "paid")
                 {
+                    _unitOfWork.OrderHeaderRepository.UpdateStripePaymentId(id, headerFromDb.SessionId, session.PaymentIntentId);     
                     _unitOfWork.OrderHeaderRepository.UpdateStatus(id, SD.StatusApproved, SD.PaymentStatusApproved);
                     _unitOfWork.Save();
                 }
             }
 
+            //sending email
+            _emailSender.SendEmailAsync(headerFromDb.ApplicationUser.Email, "New order - Bulky Book",
+                "<p>New order created</p>");
+
             List<ShoppingCart> carts = _unitOfWork.ShoppingCartRepository.GetAll(
                 c => c.ApplicationUserId == headerFromDb.ApplicationUserId).ToList();
+            //removing session
+            HttpContext.Session.Clear();
             //clearing shopping cart
             _unitOfWork.ShoppingCartRepository.RemoveRange(carts);
             _unitOfWork.Save();
@@ -215,8 +225,12 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
         {
             var cartFromDb = _unitOfWork.ShoppingCartRepository.GetFirstOrDefault(c => c.Id == cartId);
             if (cartFromDb.Count == 1)
+            {
                 _unitOfWork.ShoppingCartRepository.Remove(cartFromDb);
-            
+                //updating session variable, it is -1 bc we didn't save changes to the db
+                var count = _unitOfWork.ShoppingCartRepository.GetAll(u => u.ApplicationUserId == cartFromDb.ApplicationUserId).ToList().Count - 1;
+                HttpContext.Session.SetInt32(SD.SessionCart, count);
+            }
             else
                 _unitOfWork.ShoppingCartRepository.DecrementCount(cartFromDb, 1);
             _unitOfWork.Save();
@@ -236,6 +250,9 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
             var cartFromDb = _unitOfWork.ShoppingCartRepository.GetFirstOrDefault(c => c.Id == cartId);
             _unitOfWork.ShoppingCartRepository.Remove(cartFromDb);
             _unitOfWork.Save();
+            //updating session variable
+            var count = _unitOfWork.ShoppingCartRepository.GetAll(u => u.ApplicationUserId == cartFromDb.ApplicationUserId).ToList().Count;
+            HttpContext.Session.SetInt32(SD.SessionCart, count);
             return RedirectToAction("Index");
         }
 
